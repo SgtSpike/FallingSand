@@ -1,0 +1,1 @@
+Generates a screensaver-like falling sand simulation in a frame.
