@@ -86,33 +86,26 @@ class FallingSand:
         self.frame_count += 1
         gx, gy = self.get_gravity()
 
-        # Determine move direction once for all particles
-        mx = 1 if gx > 0.05 else (-1 if gx < -0.05 else 0)
-        my = 1 if gy > 0.05 else (-1 if gy < -0.05 else 0)
-
-        if mx == 0 and my == 0:
-            return  # No gravity, nothing moves
+        # Check if gravity is significant
+        if abs(gx) < 0.01 and abs(gy) < 0.01:
+            return  # No significant gravity
 
         # Process in correct order based on gravity direction
-        # When gravity points +y (down), process from high y to low y
-        # This way, lower particles move first, making room for upper particles
-        if my > 0:
+        if gy > 0.01:
             y_range = range(GRID_HEIGHT - 1, -1, -1)
-        elif my < 0:
+        elif gy < -0.01:
             y_range = range(GRID_HEIGHT)
         else:
-            # No vertical gravity - alternate direction each frame
             if self.frame_count % 2 == 0:
                 y_range = range(GRID_HEIGHT)
             else:
                 y_range = range(GRID_HEIGHT - 1, -1, -1)
 
-        if mx > 0:
+        if gx > 0.01:
             x_range = range(GRID_WIDTH - 1, -1, -1)
-        elif mx < 0:
+        elif gx < -0.01:
             x_range = range(GRID_WIDTH)
         else:
-            # No horizontal gravity - alternate direction each frame
             if self.frame_count % 2 == 0:
                 x_range = range(GRID_WIDTH)
             else:
@@ -126,42 +119,50 @@ class FallingSand:
 
                 # Determine movement parameters based on particle type
                 if p == ANTIGRAV:
-                    # Antigrav moves opposite to gravity, very fast
-                    pmx, pmy = -mx, -my
+                    # Antigrav moves opposite to gravity
+                    pgx, pgy = -gx, -gy
                     steps = 2
                 else:
-                    pmx, pmy = mx, my
+                    pgx, pgy = gx, gy
                     steps = 2 if p == GOLD else 1
+
+                # Calculate movement probabilities based on gravity components
+                ax, ay = abs(pgx), abs(pgy)
+                total = ax + ay
+                if total < 0.01:
+                    continue
+
+                # Direction signs
+                sx = 1 if pgx > 0 else -1
+                sy = 1 if pgy > 0 else -1
 
                 for _ in range(steps):
                     moved = False
 
-                    # Build list of movement attempts in priority order
+                    # Build movement attempts using probability
                     attempts = []
 
-                    # Primary: move in particle's gravity direction
-                    if pmx != 0 and pmy != 0:
-                        attempts.append((x + pmx, y + pmy))  # Diagonal
-                        # When diagonal blocked, try each axis separately
-                        if abs(gy) >= abs(gx):
-                            attempts.append((x, y + pmy))  # Vertical first
-                            attempts.append((x + pmx, y))  # Then horizontal
-                        else:
-                            attempts.append((x + pmx, y))  # Horizontal first
-                            attempts.append((x, y + pmy))  # Then vertical
-                    elif pmy != 0:
-                        attempts.append((x, y + pmy))
-                    elif pmx != 0:
-                        attempts.append((x + pmx, y))
+                    # Use random to decide primary movement based on gravity ratio
+                    r = random.random() * total
+                    if r < ax:
+                        # Favor horizontal movement
+                        attempts.append((x + sx, y))
+                        attempts.append((x + sx, y + sy))
+                        attempts.append((x, y + sy))
+                    else:
+                        # Favor vertical movement
+                        attempts.append((x, y + sy))
+                        attempts.append((x + sx, y + sy))
+                        attempts.append((x + sx, y))
 
                     # Also try sliding sideways (perpendicular to movement)
                     d = random.choice([-1, 1])
-                    if pmy != 0:
-                        attempts.append((x + d, y + pmy))
-                        attempts.append((x - d, y + pmy))
-                    if pmx != 0:
-                        attempts.append((x + pmx, y + d))
-                        attempts.append((x + pmx, y - d))
+                    if ay > 0.01:
+                        attempts.append((x + d, y + sy))
+                        attempts.append((x - d, y + sy))
+                    if ax > 0.01:
+                        attempts.append((x + sx, y + d))
+                        attempts.append((x + sx, y - d))
 
                     # Try each movement option
                     for nx, ny in attempts:
@@ -194,10 +195,10 @@ class FallingSand:
                         spread = random.choice([-1, 1])
                         for dist in range(1, 4):
                             # Spread perpendicular to gravity direction
-                            if abs(gy) > abs(gx) * 2:
+                            if ay > ax * 2:
                                 # Mostly vertical gravity - spread horizontally
                                 wx, wy = x + spread * dist, y
-                            elif abs(gx) > abs(gy) * 2:
+                            elif ax > ay * 2:
                                 # Mostly horizontal gravity - spread vertically
                                 wx, wy = x, y + spread * dist
                             else:
