@@ -23,6 +23,7 @@ STONE = 3
 GOLD = 4
 ANTIGRAV = 5
 BEES = 6
+STYROFOAM = 7
 
 BACKGROUND_COLOR = (20, 20, 30)
 
@@ -34,6 +35,7 @@ COLORS = {
     GOLD: (255, 200, 50),
     ANTIGRAV: (240, 240, 255),
     BEES: (255, 165, 0),
+    STYROFOAM: (200, 200, 210),
 }
 
 
@@ -55,6 +57,23 @@ class FallingSand:
 
     def get_gravity(self):
         return math.sin(self.frame_angle) * 0.5, math.cos(self.frame_angle) * 0.5
+
+    def is_floating_styrofoam(self, x, y, mx, my):
+        """Check if styrofoam at (x,y) is floating on water (directly or via other styrofoam)."""
+        # Look in the gravity direction (downward) for water support
+        cx, cy = x + mx, y + my
+        for _ in range(20):
+            if not self.in_bounds(cx, cy):
+                return False
+            cell = self.grid[cx][cy]
+            if cell == WATER:
+                return True
+            if cell == STYROFOAM:
+                cx += mx
+                cy += my
+                continue
+            return False
+        return False
 
     def screen_to_grid(self, sx, sy):
         cx, cy = WIDTH // 2, HEIGHT // 2
@@ -146,6 +165,10 @@ class FallingSand:
                 if p == EMPTY or p == STONE or p == BEES:
                     continue
 
+                # Styrofoam moves at half speed - skip every other frame
+                if p == STYROFOAM and self.frame_count % 2 == 0:
+                    continue
+
                 # Determine movement parameters based on particle type
                 if p == ANTIGRAV:
                     # Antigrav moves opposite to gravity, very fast
@@ -207,6 +230,23 @@ class FallingSand:
                                 x, y = nx, ny
                                 moved = True
                                 break
+                        elif target == STYROFOAM and p == WATER:
+                            # Water is denser than styrofoam - swap them
+                            if random.random() < 0.3:
+                                self.grid[nx][ny] = WATER
+                                self.grid[x][y] = STYROFOAM
+                                x, y = nx, ny
+                                moved = True
+                                break
+                        elif target == STYROFOAM and p in (SAND, GOLD) and self.is_floating_styrofoam(nx, ny, pmx, pmy):
+                            # Sand/gold sink through floating styrofoam
+                            chance = 0.3 if p == SAND else 0.5
+                            if random.random() < chance:
+                                self.grid[nx][ny] = p
+                                self.grid[x][y] = STYROFOAM
+                                x, y = nx, ny
+                                moved = True
+                                break
                         elif target == ANTIGRAV:
                             # Sand, gold, water cannot move through antigrav
                             continue
@@ -232,6 +272,27 @@ class FallingSand:
                                 self.grid[wx][wy] = WATER
                                 self.grid[x][y] = EMPTY
                                 moved = True
+                                break
+
+                    # Styrofoam spreads when floating on water
+                    if not moved and p == STYROFOAM and self.is_floating_styrofoam(x, y, pmx, pmy):
+                        spread = random.choice([-1, 1])
+                        for dist in range(1, 3):
+                            if abs(gy) > abs(gx) * 2:
+                                wx, wy = x + spread * dist, y
+                            elif abs(gx) > abs(gy) * 2:
+                                wx, wy = x, y + spread * dist
+                            else:
+                                if random.random() < 0.5:
+                                    wx, wy = x + spread * dist, y - spread * dist
+                                else:
+                                    wx, wy = x - spread * dist, y + spread * dist
+                            if self.is_empty(wx, wy):
+                                self.grid[wx][wy] = STYROFOAM
+                                self.grid[x][y] = EMPTY
+                                moved = True
+                                break
+                            elif self.in_bounds(wx, wy) and self.grid[wx][wy] != EMPTY:
                                 break
 
                     if not moved:
@@ -264,8 +325,8 @@ class FallingSand:
 
         # UI
         font = pygame.font.Font(None, 24)
-        names = {SAND: "Sand", WATER: "Water", STONE: "Stone", GOLD: "Gold", ANTIGRAV: "Antigrav", BEES: "Bees"}
-        surface.blit(font.render(f"[1-6] Type: {names[self.current_type]}", True, (200, 200, 200)), (10, 10))
+        names = {SAND: "Sand", WATER: "Water", STONE: "Stone", GOLD: "Gold", ANTIGRAV: "Antigrav", BEES: "Bees", STYROFOAM: "Styrofoam"}
+        surface.blit(font.render(f"[1-7] Type: {names[self.current_type]}  |  Brush: {self.brush_size}", True, (200, 200, 200)), (10, 10))
         surface.blit(font.render(f"FPS: {clock.get_fps():.0f}", True, (200, 200, 200)), (10, 35))
         surface.blit(font.render("Arrows: Rotate | LMB/RMB: Draw/Erase | C: Clear", True, (150, 150, 150)), (10, 60))
 
@@ -291,6 +352,8 @@ def main():
                     sim.current_type = ANTIGRAV
                 elif event.key == pygame.K_6:
                     sim.current_type = BEES
+                elif event.key == pygame.K_7:
+                    sim.current_type = STYROFOAM
                 elif event.key == pygame.K_c:
                     sim.grid = [[EMPTY] * GRID_HEIGHT for _ in range(GRID_WIDTH)]
                 elif event.key == pygame.K_ESCAPE:
