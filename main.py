@@ -22,6 +22,7 @@ WATER = 2
 STONE = 3
 GOLD = 4
 ANTIGRAV = 5
+BEES = 6
 
 BACKGROUND_COLOR = (20, 20, 30)
 
@@ -32,6 +33,7 @@ COLORS = {
     STONE: (80, 80, 80),
     GOLD: (255, 200, 50),
     ANTIGRAV: (240, 240, 255),
+    BEES: (255, 165, 0),
 }
 
 
@@ -84,28 +86,55 @@ class FallingSand:
     def update(self):
         self.frame_angle += (self.target_angle - self.frame_angle) * 0.08
         self.frame_count += 1
+
+        # Update bees - random movement biased toward center
+        cx, cy = GRID_WIDTH // 2, GRID_HEIGHT // 2
+        for y in range(GRID_HEIGHT):
+            for x in range(GRID_WIDTH):
+                if self.grid[x][y] != BEES:
+                    continue
+                # Random direction with slight center bias
+                dx = random.choice([-1, 0, 1])
+                dy = random.choice([-1, 0, 1])
+                # Bias toward center
+                #if random.random() < 0.05:
+                #    dx = 1 if x < cx else -1
+                #if random.random() < 0.05:
+                #    dy = 1 if y < cy else -1
+                nx, ny = x + dx, y + dy
+                if self.is_empty(nx, ny):
+                    self.grid[nx][ny] = BEES
+                    self.grid[x][y] = EMPTY
+
         gx, gy = self.get_gravity()
 
-        # Check if gravity is significant
-        if abs(gx) < 0.01 and abs(gy) < 0.01:
-            return  # No significant gravity
+        # Determine move direction once for all particles
+        mx = 1 if gx > 0.05 else (-1 if gx < -0.05 else 0)
+        my = 1 if gy > 0.05 else (-1 if gy < -0.05 else 0)
+
+        if mx == 0 and my == 0:
+            return  # No gravity, nothing moves
 
         # Process in correct order based on gravity direction
-        if gy > 0.01:
+        # When gravity points +y (down), process from high y to low y
+        # This way, lower particles move first, making room for upper particles
+        if my > 0:
             y_range = range(GRID_HEIGHT - 1, -1, -1)
-        elif gy < -0.01:
+        elif my < 0:
             y_range = range(GRID_HEIGHT)
         else:
+            # No vertical gravity - alternate direction each frame
             if self.frame_count % 2 == 0:
                 y_range = range(GRID_HEIGHT)
             else:
                 y_range = range(GRID_HEIGHT - 1, -1, -1)
 
-        if gx > 0.01:
+        if mx > 0:
             x_range = range(GRID_WIDTH - 1, -1, -1)
-        elif gx < -0.01:
+        elif mx < 0:
             x_range = range(GRID_WIDTH)
         else:
+            # No horizontal gravity - alternate direction each frame
             if self.frame_count % 2 == 0:
                 x_range = range(GRID_WIDTH)
             else:
@@ -114,55 +143,47 @@ class FallingSand:
         for y in y_range:
             for x in x_range:
                 p = self.grid[x][y]
-                if p == EMPTY or p == STONE:
+                if p == EMPTY or p == STONE or p == BEES:
                     continue
 
                 # Determine movement parameters based on particle type
                 if p == ANTIGRAV:
-                    # Antigrav moves opposite to gravity
-                    pgx, pgy = -gx, -gy
+                    # Antigrav moves opposite to gravity, very fast
+                    pmx, pmy = -mx, -my
                     steps = 2
                 else:
-                    pgx, pgy = gx, gy
+                    pmx, pmy = mx, my
                     steps = 2 if p == GOLD else 1
-
-                # Calculate movement probabilities based on gravity components
-                ax, ay = abs(pgx), abs(pgy)
-                total = ax + ay
-                if total < 0.01:
-                    continue
-
-                # Direction signs
-                sx = 1 if pgx > 0 else -1
-                sy = 1 if pgy > 0 else -1
 
                 for _ in range(steps):
                     moved = False
 
-                    # Build movement attempts using probability
+                    # Build list of movement attempts in priority order
                     attempts = []
 
-                    # Use random to decide primary movement based on gravity ratio
-                    r = random.random() * total
-                    if r < ax:
-                        # Favor horizontal movement
-                        attempts.append((x + sx, y))
-                        attempts.append((x + sx, y + sy))
-                        attempts.append((x, y + sy))
-                    else:
-                        # Favor vertical movement
-                        attempts.append((x, y + sy))
-                        attempts.append((x + sx, y + sy))
-                        attempts.append((x + sx, y))
+                    # Primary: move in particle's gravity direction
+                    if pmx != 0 and pmy != 0:
+                        attempts.append((x + pmx, y + pmy))  # Diagonal
+                        # When diagonal blocked, try each axis separately
+                        if abs(gy) >= abs(gx):
+                            attempts.append((x, y + pmy))  # Vertical first
+                            attempts.append((x + pmx, y))  # Then horizontal
+                        else:
+                            attempts.append((x + pmx, y))  # Horizontal first
+                            attempts.append((x, y + pmy))  # Then vertical
+                    elif pmy != 0:
+                        attempts.append((x, y + pmy))
+                    elif pmx != 0:
+                        attempts.append((x + pmx, y))
 
                     # Also try sliding sideways (perpendicular to movement)
                     d = random.choice([-1, 1])
-                    if ay > 0.01:
-                        attempts.append((x + d, y + sy))
-                        attempts.append((x - d, y + sy))
-                    if ax > 0.01:
-                        attempts.append((x + sx, y + d))
-                        attempts.append((x + sx, y - d))
+                    if pmy != 0:
+                        attempts.append((x + d, y + pmy))
+                        attempts.append((x - d, y + pmy))
+                    if pmx != 0:
+                        attempts.append((x + pmx, y + d))
+                        attempts.append((x + pmx, y - d))
 
                     # Try each movement option
                     for nx, ny in attempts:
@@ -195,10 +216,10 @@ class FallingSand:
                         spread = random.choice([-1, 1])
                         for dist in range(1, 4):
                             # Spread perpendicular to gravity direction
-                            if ay > ax * 2:
+                            if abs(gy) > abs(gx) * 2:
                                 # Mostly vertical gravity - spread horizontally
                                 wx, wy = x + spread * dist, y
-                            elif ax > ay * 2:
+                            elif abs(gx) > abs(gy) * 2:
                                 # Mostly horizontal gravity - spread vertically
                                 wx, wy = x, y + spread * dist
                             else:
@@ -243,8 +264,8 @@ class FallingSand:
 
         # UI
         font = pygame.font.Font(None, 24)
-        names = {SAND: "Sand", WATER: "Water", STONE: "Stone", GOLD: "Gold", ANTIGRAV: "Antigrav"}
-        surface.blit(font.render(f"[1-5] Type: {names[self.current_type]}", True, (200, 200, 200)), (10, 10))
+        names = {SAND: "Sand", WATER: "Water", STONE: "Stone", GOLD: "Gold", ANTIGRAV: "Antigrav", BEES: "Bees"}
+        surface.blit(font.render(f"[1-6] Type: {names[self.current_type]}", True, (200, 200, 200)), (10, 10))
         surface.blit(font.render(f"FPS: {clock.get_fps():.0f}", True, (200, 200, 200)), (10, 35))
         surface.blit(font.render("Arrows: Rotate | LMB/RMB: Draw/Erase | C: Clear", True, (150, 150, 150)), (10, 60))
 
@@ -268,6 +289,8 @@ def main():
                     sim.current_type = GOLD
                 elif event.key == pygame.K_5:
                     sim.current_type = ANTIGRAV
+                elif event.key == pygame.K_6:
+                    sim.current_type = BEES
                 elif event.key == pygame.K_c:
                     sim.grid = [[EMPTY] * GRID_HEIGHT for _ in range(GRID_WIDTH)]
                 elif event.key == pygame.K_ESCAPE:
